@@ -13,14 +13,13 @@ flat and separated (see `layout='print'`).
 from __future__ import annotations
 
 import math
-import sys
 
-# Allow `blender -P burr_blender.py` to find the math core next to this file.
-sys.path.insert(0, __file__.rsplit("/", 1)[0] if "/" in __file__ else ".")
+import bpy  # type: ignore  # only available inside Blender
 
-import bpy  # type: ignore  # noqa: E402  (only available inside Blender)
-
-from burr_math import Piece, standard_six_piece_burr  # noqa: E402
+# Requires the shared math package:  pip install prolific-cad-math
+# (or: pip install git+https://github.com/M3GA-MAK3R/prolific-cad-math.git)
+# Install it into the SAME Python that runs Blender's bpy.
+from prolific_cad_math import Piece, standard_six_piece_burr
 
 
 # Orientation per piece index: (euler_rotation, assembled_offset_in_units)

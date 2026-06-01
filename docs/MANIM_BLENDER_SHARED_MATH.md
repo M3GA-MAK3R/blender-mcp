@@ -9,7 +9,7 @@
 
 ```
             ┌─────────────────────────────┐
-            │   MATH CORE (pure Python)    │   burr_math.py
+            │  prolific-cad-math (pip pkg) │   pip install
             │  voxel model → Box lists     │   no Manim, no bpy
             └──────────────┬──────────────┘
                    ┌────────┴────────┐
@@ -65,10 +65,12 @@ makes tolerance iteration fast and unambiguous.
 
 | File | Repo | Role |
 |---|---|---|
-| `prolific_cad/burr_math.py` | both (mirrored) | math core — single source of truth |
+| `prolific_cad_math` (pkg) | [prolific-cad-math](https://github.com/M3GA-MAK3R/prolific-cad-math) | math core — single source of truth, pip-installed |
 | `prolific_cad/burr_blender.py` | blender-mcp | bpy mesh builder (mm + clearance) |
-| `prolific_cad/test_burr.py` | blender-mcp | validates merge/volumes/clearance |
+| `prolific_cad/requirements.txt` | blender-mcp | pins the shared math package |
 | `prolific_cad/burr_manim.py` | ProlificManim | ManimGL explainer scene |
+
+The canonical tests (merge/volumes/clearance) now live in the package repo.
 
 ## 5. Where game characters fit
 
@@ -78,9 +80,9 @@ to a part to sanity-check real-world size and handling).
 
 ## 6. Open items / risks
 
-- **Math core is mirrored** into both repos for now. *Action: promote to a tiny
-  shared pip package (`prolific-cad-math`) so there's truly one copy.* Flag:
-  until then, keep the two copies in sync.
+- **Math core is now a pip package** (`prolific-cad-math`) — single source of
+  truth, no more mirroring. Install it into the **same Python that runs bpy**
+  (Blender's bundled interpreter) and into the Manim env.
 - **Manim `Cube` stretch API** assumed (`set_width/height/depth(stretch=True)`);
   verify against the pinned ManimGL build.
 - **Solvability** is by construction from the standard pattern set; add an
