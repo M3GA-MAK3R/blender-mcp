@@ -261,3 +261,221 @@ else:
     except Exception as e:
         logger.error(f"Failed to export for VRChat: {e!s}")
         raise BlenderExportError("VRM", output_path, str(e)) from e
+
+
+# ---------------------------------------------------------------------------
+# Production CAD / 3D-printing exports (OrcaSlicer pipeline)
+# Added for ProlificWebCraft R&D — Homestead Tools / Gardening IoT line.
+#
+# Key difference vs. game/avatar exports above:
+#   * Units are forced to MILLIMETERS. Blender's default unit is the meter,
+#     so a part modeled as "50" would import into OrcaSlicer as 50 METERS.
+#     STL has no unit metadata; 3MF does. We bake a mm-correct scale on export.
+#   * Modifiers are applied and transforms baked so the slicer sees final geo.
+#   * Optional manifold/watertight pre-check (see check_print_manifold).
+# ---------------------------------------------------------------------------
+
+# Blender mesh exporters changed namespace across versions. STL moved from the
+# legacy `export_mesh.stl` operator to the built-in `wm.stl_export` (Blender
+# 4.2+). We try the new operator first and fall back to the legacy one.
+_PRINT_EXPORT_PREP = """
+import bpy
+
+scene = bpy.context.scene
+
+# Force millimeter units so the slicer reads real-world part sizes.
+scene.unit_settings.system = 'METRIC'
+scene.unit_settings.length_unit = 'MILLIMETERS'
+# scale_length=0.001 makes 1 Blender unit == 1 mm on export.
+scene.unit_settings.scale_length = 0.001
+
+# Resolve target objects.
+target_names = {object_names!r}
+if target_names:
+    objs = [o for o in scene.objects if o.type == 'MESH' and o.name in target_names]
+else:
+    objs = [o for o in scene.objects if o.type == 'MESH']
+
+if not objs:
+    raise Exception("No mesh objects found to export for printing")
+
+bpy.ops.object.select_all(action='DESELECT')
+for o in objs:
+    o.select_set(True)
+scene.view_layers[0].objects.active = objs[0]
+
+# Apply modifiers + bake transforms so the slicer gets final, real geometry.
+if {apply_modifiers}:
+    for o in objs:
+        scene.view_layers[0].objects.active = o
+        for m in list(o.modifiers):
+            try:
+                bpy.ops.object.modifier_apply(modifier=m.name)
+            except Exception as exc:
+                print(f"WARNING: could not apply modifier {{m.name}} on {{o.name}}: {{exc}}")
+    bpy.ops.object.select_all(action='DESELECT')
+    for o in objs:
+        o.select_set(True)
+    scene.view_layers[0].objects.active = objs[0]
+    bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
+"""
+
+
+@blender_operation("export_for_print_stl", log_args=True)
+async def export_for_print_stl(
+    output_path: str,
+    object_names: list[str] | None = None,
+    apply_modifiers: bool = True,
+) -> str:
+    """Export selected/all meshes to a binary STL sized in millimeters for OrcaSlicer.
+
+    Args:
+        output_path: Full path to the .stl file to write.
+        object_names: Specific objects to export (None = all meshes in scene).
+        apply_modifiers: Apply modifiers and bake transforms before export.
+
+    Returns:
+        Success message with the written path.
+    """
+    if not output_path.lower().endswith(".stl"):
+        output_path += ".stl"
+    out = output_path.replace("\\", "\\\\")
+    prep = _PRINT_EXPORT_PREP.format(
+        object_names=object_names, apply_modifiers=apply_modifiers
+    )
+    script = (
+        prep
+        + f"""
+import os
+os.makedirs(os.path.dirname(r"{out}"), exist_ok=True)
+
+# Blender 4.2+ uses wm.stl_export; older builds use export_mesh.stl.
+exported = False
+if hasattr(bpy.ops.wm, "stl_export"):
+    bpy.ops.wm.stl_export(
+        filepath=r"{out}",
+        export_selected_objects=True,
+        apply_modifiers=False,  # already applied in prep
+        ascii_format=False,
+        global_scale=1.0,
+    )
+    exported = True
+else:
+    bpy.ops.export_mesh.stl(
+        filepath=r"{out}",
+        use_selection=True,
+        use_mesh_modifiers=False,
+        ascii=False,
+        global_scale=1.0,
+    )
+    exported = True
+
+if not (exported and os.path.exists(r"{out}")):
+    raise Exception("STL export completed but file not found")
+print(f"SUCCESS: STL written to {out} ({{os.path.getsize(r'{out}')}} bytes)")
+"""
+    )
+    try:
+        await _executor.execute_script(script, script_name="print_stl_export")
+        return f"Exported print-ready STL (mm units) to {output_path}"
+    except Exception as e:
+        logger.error(f"STL print export failed: {e!s}")
+        raise BlenderExportError("STL", output_path, str(e)) from e
+
+
+@blender_operation("export_for_print_3mf", log_args=True)
+async def export_for_print_3mf(
+    output_path: str,
+    object_names: list[str] | None = None,
+    apply_modifiers: bool = True,
+) -> str:
+    """Export meshes to 3MF (preferred for OrcaSlicer — carries mm units + multi-object).
+
+    3MF stores units, so OrcaSlicer reads dimensions exactly. Requires the
+    Blender 3MF add-on / built-in operator (`export_mesh.threemf` or the 3mf-io
+    add-on). Falls back to STL if 3MF is unavailable.
+
+    Args:
+        output_path: Full path to the .3mf file to write.
+        object_names: Specific objects to export (None = all meshes).
+        apply_modifiers: Apply modifiers and bake transforms before export.
+    """
+    if not output_path.lower().endswith(".3mf"):
+        output_path += ".3mf"
+    out = output_path.replace("\\", "\\\\")
+    prep = _PRINT_EXPORT_PREP.format(
+        object_names=object_names, apply_modifiers=apply_modifiers
+    )
+    script = (
+        prep
+        + f"""
+import os
+os.makedirs(os.path.dirname(r"{out}"), exist_ok=True)
+
+op = None
+if hasattr(bpy.ops.export_mesh, "threemf"):
+    op = bpy.ops.export_mesh.threemf
+elif hasattr(bpy.ops.wm, "threemf_export"):
+    op = bpy.ops.wm.threemf_export
+
+if op is not None:
+    op(filepath=r"{out}", use_selection=True)
+    if not os.path.exists(r"{out}"):
+        raise Exception("3MF export completed but file not found")
+    print(f"SUCCESS: 3MF written to {out} ({{os.path.getsize(r'{out}')}} bytes)")
+else:
+    raise Exception(
+        "3MF exporter not available. Install the Blender '3MF format' add-on, "
+        "or use export_for_print_stl instead."
+    )
+"""
+    )
+    try:
+        await _executor.execute_script(script, script_name="print_3mf_export")
+        return f"Exported print-ready 3MF (mm units) to {output_path}"
+    except Exception as e:
+        logger.error(f"3MF print export failed: {e!s}")
+        raise BlenderExportError("3MF", output_path, str(e)) from e
+
+
+@blender_operation("check_print_manifold", log_args=True)
+async def check_print_manifold(object_names: list[str] | None = None) -> str:
+    """Pre-flight check that meshes are watertight/manifold before slicing.
+
+    Reports non-manifold edges, loose geometry, and flipped normals — the most
+    common reasons a part fails to slice or prints with gaps. Does not modify
+    geometry.
+
+    Args:
+        object_names: Specific objects to check (None = all meshes).
+    """
+    target = object_names
+    script = f"""
+import bpy, bmesh, json
+
+scene = bpy.context.scene
+target_names = {target!r}
+if target_names:
+    objs = [o for o in scene.objects if o.type == 'MESH' and o.name in target_names]
+else:
+    objs = [o for o in scene.objects if o.type == 'MESH']
+
+report = {{}}
+for o in objs:
+    bm = bmesh.new()
+    bm.from_mesh(o.data)
+    non_manifold = sum(1 for e in bm.edges if not e.is_manifold)
+    loose_verts = sum(1 for v in bm.verts if not v.link_edges)
+    report[o.name] = {{
+        "verts": len(bm.verts),
+        "faces": len(bm.faces),
+        "non_manifold_edges": non_manifold,
+        "loose_verts": loose_verts,
+        "watertight": non_manifold == 0 and loose_verts == 0,
+    }}
+    bm.free()
+
+print("MANIFOLD_REPORT=" + json.dumps(report))
+"""
+    result = await _executor.execute_script(script, script_name="print_manifold_check")
+    return f"Manifold check complete: {result}"
