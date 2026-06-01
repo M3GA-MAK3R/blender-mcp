@@ -1,7 +1,7 @@
 """Blender adapter: build printable burr-puzzle meshes from the math core.
 
 Run *inside* Blender (headless via blender-mcp's executor, or `blender -P`).
-Consumes Box lists from burr_math.py and emits one mesh object per piece,
+Consumes Box lists from the prolific_cad_math package and emits one mesh per piece,
 sized in millimeters with fabrication clearance applied so the printed pieces
 actually slide together.
 
