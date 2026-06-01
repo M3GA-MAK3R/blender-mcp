@@ -198,3 +198,4 @@ yarn-error.log*
 .env.production.local
 
 _dashboard/
+prolific_cad/__pycache__/
