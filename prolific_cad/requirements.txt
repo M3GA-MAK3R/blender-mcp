@@ -1,0 +1,3 @@
+# Shared first-principles geometry math core (single source of truth).
+# Install into the same Python that runs Blender's bpy.
+prolific-cad-math @ git+https://github.com/M3GA-MAK3R/prolific-cad-math.git

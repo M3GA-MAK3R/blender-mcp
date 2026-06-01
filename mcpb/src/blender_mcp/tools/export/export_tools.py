@@ -29,6 +29,9 @@ def _register_export_tools():
         Supports multiple operations through the operation parameter:
         - export_unity: Export to Unity-compatible formats
         - export_vrchat: Export to VRChat-compatible formats
+        - export_print_stl: Export binary STL in millimeters for OrcaSlicer
+        - export_print_3mf: Export 3MF in millimeters for OrcaSlicer (preferred)
+        - check_manifold: Pre-flight watertight/manifold check (no file written)
 
         Args:
             operation: Export operation type
@@ -46,10 +49,33 @@ def _register_export_tools():
         Returns:
             Success message with export details
         """
-        from blender_mcp.handlers.export_handler import export_for_unity, export_for_vrchat
+        from blender_mcp.handlers.export_handler import (
+            check_print_manifold,
+            export_for_print_3mf,
+            export_for_print_stl,
+            export_for_unity,
+            export_for_vrchat,
+        )
 
         try:
-            if operation == "export_unity":
+            if operation == "export_print_stl":
+                return await export_for_print_stl(
+                    output_path=output_path,
+                    object_names=object_names,
+                    apply_modifiers=use_mesh_modifiers,
+                )
+
+            elif operation == "export_print_3mf":
+                return await export_for_print_3mf(
+                    output_path=output_path,
+                    object_names=object_names,
+                    apply_modifiers=use_mesh_modifiers,
+                )
+
+            elif operation == "check_manifold":
+                return await check_print_manifold(object_names=object_names)
+
+            elif operation == "export_unity":
                 # export_for_unity doesn't accept object_names parameter
                 # TODO: Add object_names support to export_for_unity if needed
                 return await export_for_unity(output_path=output_path)
@@ -60,7 +86,11 @@ def _register_export_tools():
                 return await export_for_vrchat(output_path=output_path)
 
             else:
-                return f"Unknown export operation: {operation}. Available: export_unity, export_vrchat"
+                return (
+                    f"Unknown export operation: {operation}. Available: "
+                    "export_unity, export_vrchat, export_print_stl, "
+                    "export_print_3mf, check_manifold"
+                )
 
         except Exception as e:
             return f"Error in export operation '{operation}': {e!s}"
